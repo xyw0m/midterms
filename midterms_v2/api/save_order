@@ -1,0 +1,52 @@
+<?php
+session_start();
+// Include necessary files
+require_once '../includes/config.php';
+require_once '../includes/class.order.php'; 
+
+header('Content-Type: application/json');
+
+// 1. Check if user is logged in
+if (!isset($_SESSION['user_id'])) {
+    echo json_encode(['success' => false, 'message' => 'User not authenticated.']);
+    exit;
+}
+
+// 2. Check for POST request and JSON data
+$data = json_decode(file_get_contents('php://input'), true);
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST' || empty($data)) {
+    echo json_encode(['success' => false, 'message' => 'Invalid request method or missing data.']);
+    exit;
+}
+
+// 3. Extract and validate required data
+$user_id = $_SESSION['user_id']; // Current logged-in user (cashier)
+$total_amount = $data['total_amount'] ?? 0;
+$amount_paid = $data['amount_paid'] ?? 0;
+$change_due = $data['change_due'] ?? 0;
+$cart = $data['cart'] ?? [];
+
+if ($total_amount <= 0 || empty($cart)) {
+    echo json_encode(['success' => false, 'message' => 'Order is empty or total is invalid.']);
+    exit;
+}
+
+// 4. Process the order using the Order Class
+try {
+    $order = new Order();
+    $success = $order->createOrder($user_id, $total_amount, $amount_paid, $change_due, $cart);
+
+    if ($success) {
+        echo json_encode(['success' => true, 'message' => 'Order successfully saved.']);
+    } else {
+        // This generally indicates a database rollback (check PHP error log)
+        echo json_encode(['success' => false, 'message' => 'Failed to save order transaction.']);
+    }
+
+} catch (Exception $e) {
+    // Catch database connection or class initialization errors
+    echo json_encode(['success' => false, 'message' => 'System error: ' . $e->getMessage()]);
+    error_log("POS API Error: " . $e->getMessage());
+}
+?>
