@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alpine.js POS System</title>
+    <!-- Load Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Alpine.js -->
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <!-- Load SweetAlert2 for notifications (as in the original PHP file) -->
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <style>
+        [x-cloak] { display: none !important; }
+        .product-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 1.5rem;
+        }
+        .order-panel {
+            min-height: 80vh;
+        }
+        .inter-font {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 inter-font">
+
+    <div
+        x-data="posApp()"
+        x-init="init()"
+        class="flex flex-col lg:flex-row h-screen antialiased"
+        x-cloak
+    >
+        <!-- Product Panel (Left Side) -->
+        <div class="lg:w-3/5 p-6 overflow-y-auto bg-white shadow-lg">
+            <h1 class="text-3xl font-extrabold text-gray-900 mb-6">Product Catalog</h1>
+
+            <div class="product-grid">
+                <!-- 
+                    The products are mocked here. In a real app, this data would come from the PHP backend 
+                    and be injected as JSON into the x-data block during page load, or fetched via an AJAX call.
+                -->
+                <template x-for="product in products" :key="product.id">
+                    <div class="product-card bg-gray-50 border rounded-xl shadow-md overflow-hidden hover:shadow-xl transition-shadow duration-300">
+                        <img :src="product.image" :alt="product.name" class="w-full h-32 object-cover">
+                        <div class="p-4">
+                            <h3 class="text-lg font-semibold text-gray-800" x-text="product.name"></h3>
+                            <p class="text-sm text-gray-500 mb-3">
+                                <span class="price font-bold text-xl text-indigo-600" x-text="'PHP ' + product.price.toFixed(2)"></span>
+                            </p>
+                            
+                            <!-- QUANTITY INPUT -->
+                            <div class="flex items-center space-x-2 mb-4">
+                                <label :for="'qty-' + product.id" class="text-sm font-medium">Qty:</label>
+                                <!-- x-model is used to hold the quantity locally for the product before adding to cart -->
+                                <input 
+                                    type="number" 
+                                    min="1" 
+                                    value="1" 
+                                    x-model.number="product.qty" 
+                                    :id="'qty-' + product.id" 
+                                    class="product-qty w-16 border border-gray-300 rounded-lg text-center p-1 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                                    @focus="$event.target.select()"
+                                >
+                            </div>
+
+                            <!-- ADD TO ORDER BUTTON -->
+                            <button 
+                                @click="addToCart(product)" 
+                                class="add-to-order-btn w-full bg-indigo-600 text-white font-medium py-2 rounded-lg hover:bg-indigo-700 transition duration-150 shadow-md hover:shadow-lg"
+                                title="Add to Order"
+                            >
+                                Add to Order
+                            </button>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <!-- Order Panel (Right Side) -->
+        <div class="lg:w-2/5 order-panel flex flex-col p-6 bg-gray-100 shadow-inner">
+            <h2 class="text-3xl font-extrabold text-gray-900 mb-6">Current Order</h2>
+
+            <!-- Ordered Items List -->
+            <div id="ordered-items-list" class="flex-grow overflow-y-auto bg-white rounded-xl p-4 border border-gray-200 shadow-inner mb-6">
+                <!-- Alpine.js replaces renderCart() -->
+                <template x-if="Object.keys(cart).length === 0">
+                    <p class="empty-order-msg text-center text-gray-500 py-4 italic">No items in the order. Add products to start a new sale.</p>
+                </template>
+                
+                <template x-for="([id, item]) in Object.entries(cart)" :key="id">
+                    <div class="ordered-item flex justify-between items-center border-b py-2 last:border-b-0">
+                        <!-- Item Details -->
+                        <div class="flex-grow">
+                            <span class="item-name font-medium text-gray-800 block" x-text="item.name"></span>
+                            <span class="item-price text-xs text-gray-500" x-text="'@ PHP ' + item.price.toFixed(2)"></span>
+                        </div>
+                        
+                        <!-- Quantity, Subtotal, Remove Button -->
+                        <div class="flex items-center space-x-3">
+                            <!-- QUANTITY INPUT (Replaces handleQuantityChange) -->
+                            <input 
+                                type="number" 
+                                min="0" 
+                                x-model.number="item.qty" 
+                                @change="updateQuantity(id, item.qty)"
+                                class="ordered-item-qty w-14 border border-gray-300 rounded-lg text-center p-1 text-sm focus:ring-red-500 focus:border-red-500 transition duration-100" 
+                                :data-id="id"
+                            >
+
+                            <span class="item-subtotal font-bold w-16 text-right text-base text-gray-700" x-text="'PHP ' + (item.price * item.qty).toFixed(2)"></span>
+                            
+                            <!-- REMOVE BUTTON (Replaces handleRemoveItem) -->
+                            <button 
+                                @click="removeItem(id)"
+                                class="remove-item-btn text-red-500 hover:text-red-700 font-bold p-1 leading-none transition-colors duration-150 text-xl" 
+                                title="Remove Item"
+                            >
+                                &times;
+                            </button>
+                        </div>
+                    </div>
+                </template>
+            </div>
+
+            <!-- Order Summary & Payment -->
+            <div class="order-summary mt-auto space-y-4">
+                <div class="flex justify-between items-center text-xl font-bold border-t pt-4">
+                    <span>TOTAL:</span>
+                    <span class="text-4xl text-indigo-700" id="order-total" x-text="'PHP ' + calculateTotal().toFixed(2)"></span>
+                </div>
+                
+                <!-- Payment Input -->
+                <div class="form-group flex items-center space-x-4">
+                    <label for="amount-paid" class="text-lg font-medium whitespace-nowrap">Amount Paid (PHP):</label>
+                    <input 
+                        type="number" 
+                        id="amount-paid" 
+                        min="0" 
+                        x-model.number="amountPaid"
+                        class="flex-grow border-2 border-gray-300 rounded-lg p-3 text-2xl font-semibold text-center focus:border-indigo-500 transition duration-150"
+                        :disabled="Object.keys(cart).length === 0"
+                    >
+                </div>
+
+                <!-- Change Due Display (Replaces updateChangeDisplay) -->
+                <div 
+                    x-show="Object.keys(cart).length > 0 && amountPaid > 0" 
+                    class="p-2 rounded-lg text-center"
+                    :class="{ 'bg-green-100 text-green-700': calculateChange() >= 0, 'bg-red-100 text-red-700': calculateChange() < 0 }"
+                >
+                    <p class="text-lg font-bold">
+                        Change Due: 
+                        <span x-text="'PHP ' + Math.abs(calculateChange()).toFixed(2)"></span>
+                        <template x-if="calculateChange() < 0">
+                            <span class="text-sm font-normal">(Short)</span>
+                        </template>
+                    </p>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="flex space-x-4 pt-2">
+                    <!-- PAY BUTTON -->
+                    <button 
+                        @click="processPayment()" 
+                        id="pay-button"
+                        class="flex-1 bg-green-500 text-white font-extrabold text-lg py-3 rounded-xl hover:bg-green-600 transition duration-150 shadow-lg hover:shadow-xl disabled:bg-gray-400 disabled:cursor-not-allowed transform hover:scale-[1.01]"
+                        :disabled="Object.keys(cart).length === 0 || calculateChange() < 0"
+                    >
+                        Process Payment
+                    </button>
+                    <!-- CLEAR BUTTON -->
+                    <button 
+                        @click="clearOrderPrompt()" 
+                        id="clear-order-button"
+                        class="w-1/4 bg-red-500 text-white font-semibold py-3 rounded-xl hover:bg-red-600 transition duration-150 shadow-lg disabled:bg-gray-400 disabled:cursor-not-allowed"
+                        :disabled="Object.keys(cart).length === 0"
+                    >
+                        Clear
+                    </button>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * The CoreJS/script.js logic has been moved and encapsulated into this Alpine.js component function.
+         * The manual DOM manipulation (e.g., getElementById, innerHTML = '', createElement) is replaced by 
+         * Alpine's reactive directives (x-for, x-text, x-model, :disabled).
+         */
+        function posApp() {
+            return {
+                // --- Reactive State ---
+                cart: {}, // {productId: {name, price, qty}}
+                products: [ // Mock Data
+                    { id: 1, name: 'Hotdog', price: 25.00, qty: 1, image: 'https://placehold.co/150x150/0000FF/FFFFFF?text=Hotdog' },
+                    { id: 2, name: 'Shanghai Rolls', price: 40.00, qty: 1, image: 'https://placehold.co/150x150/FF0000/FFFFFF?text=Shanghai' },
+                    { id: 3, name: 'Burger', price: 65.00, qty: 1, image: 'https://placehold.co/150x150/00FF00/000000?text=Burger' },
+                    { id: 4, name: 'Fries (Large)', price: 90.00, qty: 1, image: 'https://placehold.co/150x150/FFFF00/000000?text=Fries' },
+                    { id: 5, name: 'Iced Tea', price: 20.00, qty: 1, image: 'https://placehold.co/150x150/00FFFF/000000?text=Tea' },
+                    { id: 6, name: 'Combo Meal A', price: 120.00, qty: 1, image: 'https://placehold.co/150x150/FF00FF/FFFFFF?text=Combo' },
+                ],
+                amountPaid: 0, // Input amount paid by customer
+
+                // --- Initialization (replaces loadCartFromLocalStorage) ---
+                init() {
+                    const storedCart = localStorage.getItem('posCart');
+                    if (storedCart) {
+                        this.cart = JSON.parse(storedCart);
+                    }
+                    // Initialize product quantities for UI model
+                    this.products = this.products.map(p => ({ ...p, qty: 1 }));
+                },
+
+                // --- Persistence ---
+                saveCartToLocalStorage() {
+                    localStorage.setItem('posCart', JSON.stringify(this.cart));
+                },
+
+                // --- Calculations (Computed State) ---
+                calculateTotal() {
+                    return Object.values(this.cart).reduce((sum, item) => sum + (item.price * item.qty), 0);
+                },
+
+                calculateChange() {
+                    return this.amountPaid - this.calculateTotal();
+                },
+
+                // --- Actions (Replaces CoreJS Functions) ---
+
+                // Replaces setupProductButtons() and addToCart() logic
+                addToCart(product) {
+                    const productId = product.id;
+                    const qtyToAdd = product.qty || 1; // Use x-model quantity or default to 1
+
+                    if (qtyToAdd <= 0) {
+                        Swal.fire('Invalid Quantity', 'Quantity must be at least 1.', 'warning');
+                        return;
+                    }
+
+                    this.cart = { ...this.cart }; // Ensure reactivity by creating a new object reference
+                    
+                    if (this.cart[productId]) {
+                        this.cart[productId].qty += qtyToAdd;
+                    } else {
+                        this.cart[productId] = {
+                            name: product.name,
+                            price: product.price,
+                            qty: qtyToAdd
+                        };
+                    }
+                    
+                    this.saveCartToLocalStorage();
+                    
+                    // Reset quantity input on the product card back to 1
+                    const updatedProducts = this.products.map(p => 
+                        p.id === productId ? { ...p, qty: 1 } : p
+                    );
+                    this.products = updatedProducts;
+                },
+                
+                // Replaces handleQuantityChange() logic for cart items
+                updateQuantity(id, newQty) {
+                    newQty = parseInt(newQty, 10);
+                    this.cart = { ...this.cart }; // Ensure reactivity
+
+                    if (newQty > 0) {
+                        this.cart[id].qty = newQty;
+                    } else {
+                        // Remove item if quantity is 0
+                        delete this.cart[id];
+                    }
+                    
+                    this.saveCartToLocalStorage();
+                },
+
+                // Replaces handleRemoveItem() logic
+                removeItem(id) {
+                    this.cart = { ...this.cart }; // Ensure reactivity
+                    delete this.cart[id];
+                    this.saveCartToLocalStorage();
+                },
+
+                // Replaces clearOrder()
+                clearOrderPrompt() {
+                    Swal.fire({
+                        title: 'Clear Order?',
+                        text: "This will remove all items from the current order.",
+                        icon: 'warning',
+                        showCancelButton: true,
+                        confirmButtonColor: '#d33',
+                        cancelButtonColor: '#3085d6',
+                        confirmButtonText: 'Yes, clear it!'
+                    }).then((result) => {
+                        if (result.isConfirmed) {
+                            this.cart = {};
+                            this.amountPaid = 0;
+                            this.saveCartToLocalStorage();
+                            Swal.fire('Cleared!', 'The order has been cleared.', 'success');
+                        }
+                    });
+                },
+
+                // Replaces processPayment()
+                async processPayment() {
+                    const totalAmount = this.calculateTotal();
+                    const changeDue = this.calculateChange();
+
+                    if (Object.keys(this.cart).length === 0) {
+                        Swal.fire('Empty Order', 'Please add items to the order first.', 'warning');
+                        return;
+                    }
+                    
+                    if (changeDue < 0) {
+                        Swal.fire({
+                            icon: 'error',
+                            title: 'Insufficient Funds',
+                            html: `Amount paid must be at least <strong>${totalAmount.toFixed(2)} PHP</strong>.`,
+                        });
+                        return;
+                    }
+
+                    // --- MOCK SERVER RESPONSE ---
+                    // Replace this section with your actual fetch call to '../api/save_order.php'
+                    await new Promise(resolve => setTimeout(resolve, 500)); 
+                    const result = { success: true };
+                    // --- END MOCK ---
+                    
+                    if (result.success) {
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'Payment Successful!',
+                            html: `
+                                Total: ${totalAmount.toFixed(2)} PHP<br>
+                                Paid: ${this.amountPaid.toFixed(2)} PHP<br>
+                                Change: <strong>${changeDue.toFixed(2)} PHP</strong>
+                            `,
+                            confirmButtonText: 'New Order'
+                        }).then(() => {
+                            this.cart = {}; // Clear cart
+                            this.amountPaid = 0; // Clear amount paid field
+                            this.saveCartToLocalStorage();
+                        });
+                    } else {
+                        Swal.fire('Transaction Error', 'Failed to save transaction history.', 'error');
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+</html>
